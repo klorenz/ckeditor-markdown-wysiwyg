@@ -1,0 +1,189 @@
+#!/bin/sh
+':' //; exec "$(command -v nodejs || command -v node)" "$0" "$@"
+
+var fs = require('fs')
+var filename, input, expected, name, html, markdown;
+
+testdata = {}
+
+for (var i=2; i< process.argv.length; i++) {
+    filename = process.argv[i].replace(/.md$/, '')
+    input = fs.readFileSync(filename+'.md').toString()
+    expected = fs.readFileSync(filename+'.out').toString()
+    name = filename.replace(/.*\//, '')
+    testdata[name] = {'markdown': input, 'html': expected, 'name': name}
+}
+
+bender_editor = {
+    config: {
+      autoParagraph: false
+    }
+  };
+
+process.stdout.write("/* bender-tags: editor,unit */\n")
+process.stdout.write("/* bender-ckeditor-plugins: markdown,entities,enterkey */\n\n")
+
+process.stdout.write("bender.editor = ")
+process.stdout.write(JSON.stringify(bender_editor, null, 2)+";\n")
+// process.stdout.write("var markdown_testdata = ")
+// process.stdout.write(JSON.stringify(testdata, null, 2))
+// process.stdout.write(";\n")
+
+setUp = function() {
+  var processor;
+  processor = this.editor.dataProcessor;
+  return processor.dataFilter.addRules({
+    attributeNames: [[/^data-cke-.*/, '']]
+  });
+}
+
+assertToHtml = function(name, html, markdown, expected) {
+  var ed, evtData, processor;
+  var html = html;
+
+  ed = this.editor;
+
+  processor = ed.dataProcessor;
+  evtData = {
+    dataValue: markdown
+  };
+  ed.fire('setData', evtData);
+
+  // var out_html = processor.toHtml(markdown);
+  var out_html = evtData.dataValue;
+  console.log("out_html1", out_html);
+
+  out_html = out_html.replace(/ id="this-is-an-h\d"/g, '');
+
+  if (!expected) {
+    expected = html.replace(/>([ \t]*\r?\n)+/g, '>')
+  }
+
+  // out_html = bender.tools.fixHtml(out_html);
+  console.log("out_html2", out_html);
+
+  return assert.areSame("\n"+expected, CKEDITOR.tools.convertRgbToHex("\n"+out_html), 'markdown->html: '+name);
+}
+
+assertTransformation = function(name, markdown, html, expected) {
+  var ed, evtData, processor;
+  var html = html;
+
+  ed = this.editor;
+  processor = ed.dataProcessor;
+
+  var dataValue = processor.toDataFormat(html);
+  console.log("dataValue", dataValue);
+  evtData = {
+    'dataValue': dataValue
+  };
+  ed.fire('setData', evtData);
+
+  // var out_html = processor.toHtml(markdown);
+  var out_html = evtData.dataValue;
+  console.log("out_html1", out_html);
+
+  out_html = out_html.replace(/ id="this-is-an-h\d"/g, '');
+  if (expected === null)
+  {
+    expected = html.replace(/>([ \t]*\r?\n)+/g, '>')
+
+    expected = expected.replace(/(<pre>[\s\S]*?<\/pre>)|(\s+)/g, function(m, pre, space){
+      if (pre) {
+        return pre;
+      } else {
+        return " ";
+      }
+    });
+  }
+
+  // out_html = bender.tools.fixHtml(out_html);
+  console.log("out_html2", out_html);
+
+  return assert.areSame("\n"+expected, CKEDITOR.tools.convertRgbToHex("\n"+out_html), 'transformation: '+name);
+}
+
+assertToMarkdown = function(name, markdown, html, expected) {
+  var ed, processor;
+  ed = this.editor;
+  processor = ed.dataProcessor;
+  if (!expected) {
+      expected = markdown.replace(/\s+$/, '')+"\n";
+      expected = expected.replace(/[ \t*]\n/g, "\n")
+  }
+
+  return assert.areSame("\n"+expected, "\n"+processor.toDataFormat(html), 'html->markdown:' + name);
+}
+
+testdata['paragraph-trailing-tab'].expectedHtml = (""
+  + "<p>This is a paragraph with 1 trailing tab.</p>"
+);
+
+testdata['ordered-list-inner-par-list'].expectedHtml = (""
+  + "<ol><li><p>1</p><ul><li>inner par list</li></ul></li><li><p>2</p></li></ol>"
+);
+
+process.stdout.write("bender_testdata = {};\n")
+process.stdout.write("bender_testdata['setUp'] = " + setUp.toString() + ";\n")
+process.stdout.write("bender_testdata['assertToHtml'] = " + assertToHtml.toString() + ";\n")
+process.stdout.write("bender_testdata['assertTransformation'] = " + assertTransformation.toString() + ";\n")
+process.stdout.write("bender_testdata['assertToMarkdown'] = " + assertToMarkdown.toString() + ";\n")
+
+for (name in testdata) {
+  markdown = testdata[name].markdown;
+  html = testdata[name].html;
+
+  expectedHtml = null
+  ;
+  if ('expectedHtml' in testdata[name])
+    expectedHtml = testdata[name].expectedHtml;
+
+  // process.stdout.write("bender_testdata['markdown -> html: "+name+"'] = function() { this.assertToHtml( " + JSON.stringify(name) + ",\n    "+ JSON.stringify(html) + ",\n    " + JSON.stringify(markdown) + "\n)};\n")
+  // process.stdout.write("bender_testdata['html -> markdown: "+name+"'] = function() { this.assertToMarkdown( " + JSON.stringify(name) + ",\n    "+ JSON.stringify(markdown) + ",\n    " + JSON.stringify(html) + "\n)};\n")
+  process.stdout.write("bender_testdata['markdown transformation: "+name+"'] = function() { this.assertTransformation( " + JSON.stringify(name) + ",\n    "+ JSON.stringify(markdown) + ",\n    " + JSON.stringify(html) + ",\n    " + JSON.stringify(expectedHtml) + "\n)};\n")
+}
+
+
+specialtests = [ 'blockquote-line-2-paragraphs', 'img-idref-title', 'img', 'img-title', 'link-bracket-paranthesis-title' ];
+
+testdata['blockquote-line-2-paragraphs'].expectedMarkdown = ( ""
+  +"> A blockquote with a very long long long long long long long long long long\n"
+  +"> long long long long long long long long long long long long long long long\n"
+  +"> long long long long long long long long long long long long long line.\n"
+  +"> \n"
+  +"> and a second very long long long long long long long long long long long\n"
+  +"> long long long long long long long long long long long long long long long\n"
+  +"> long long long long long long long long long long long long line.\n"
+  +"> \n"
+)
+
+var i, name, expectedHtml, expectedMarkdown;
+for (i = 0; i < specialtests.length; i++) {
+  name = specialtests[i];
+  markdown = testdata[name].markdown;
+  html = testdata[name].html;
+
+  expectedHtml = null;
+  expectedMarkdown = null;
+
+  if ('expectedHtml' in testdata[name])
+    expectedHtml = testdata[name].expectedHtml;
+
+  if ('expectedMarkdown' in testdata[name])
+    expectedMarkdown = testdata[name].expectedMarkdown;
+
+  process.stdout.write("bender_testdata['markdown -> html: "+name+"'] = function() { this.assertToHtml( " + JSON.stringify(name) + ",\n    "+ JSON.stringify(html) + ",\n    " + JSON.stringify(markdown) + ",\n    " + JSON.stringify(expectedHtml) + "\n)};\n")
+  process.stdout.write("bender_testdata['html -> markdown: "+name+"'] = function() { this.assertToMarkdown( " + JSON.stringify(name) + ",\n    "+ JSON.stringify(markdown) + ",\n    " + JSON.stringify(html) + ",\n    " + JSON.stringify(expectedMarkdown) + "\n)};\n")
+}
+
+// testdata2 = {
+// }
+//
+// for (name in testdata2) {
+//   markdown = testdata[name].markdown;
+//   html = testdata[name].html;
+//   process.stdout.write("bender_testdata['html -> markdown: "+name+"'] = function() { this.assertToMarkdown( " + JSON.stringify(name) + ",\n    "+ JSON.stringify(markdown) + ",\n    " + JSON.stringify(html) + "\n)};\n")
+// }
+//
+
+process.stdout.write("bender.test(bender_testdata);\n")
