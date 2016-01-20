@@ -146,7 +146,7 @@ for (var i = 0 ; i < common_mark_tests.length; i++) {
   */
 }
 
-var special_tests = [ 1, 30, 31, 32 ];
+var special_tests = [ 1, 30, 31, 32, 257 ];
 
 for (var i = 0 ; i < special_tests.length; i++) {
    rec = common_mark_tests[special_tests[i]-1];

@@ -142,11 +142,18 @@
   generateCloseTag = (node) ->
     "</#{node.tag}>\n"
 
-  generateHtml = (node) ->
-    s = generateOpenTag(node)
-    for c in node.children
-      s += generateHtml(c)
-    s += generateCloseTag(node)
+  generateHtml = (node, indent="") ->
+    if typeof node is 'string'
+      return indent + node
+
+    s = indent + generateOpenTag(node)
+    if node.children
+      for c in node.children
+        s += generateHtml(c, indent + "  ")
+
+    if not s.match /\n$/
+      s += "\n"
+    s += indent + generateCloseTag(node)
     return s
 
   html2markdown = {
@@ -156,6 +163,7 @@
     h4: ['#### ', '\n\n']
     h5: ['##### ', '\n\n']
     h6: ['###### ', '\n\n']
+
     pre: (node) ->
       if 'class' not of node.attr
         {indent: "    "}
@@ -167,12 +175,15 @@
         {indent: "    "}
 
     table:
-      collect: true
+      collect: 'inherit'
       tagClose: (node) ->
+        debugger
         if node.htmlTable
-          generateHtml(node)
+          result = generateHtml(node)
         else
-          writeMarkdownTable(node)
+          result = writeMarkdownTable(node)
+        @_write(s)
+        @flush()
 
     tbody: {}
     thead: {}
@@ -182,15 +193,13 @@
     row: {}
 
     td: {tagClose: (node) ->
-      if "\n" in node.output
+      if "\n" in node.children[node.children.length-1]
         @getParentNode('table').htmlTable = true
-      return {collect: true}
       }
 
     th: {tagClose: (node) ->
-      if "\n" in node.output
+      if "\n" in node.children[node.children.length-1]
         @getParentNode('table').htmlTable = true
-      return {collect: true}
       }
 
     dl: {}
@@ -202,15 +211,15 @@
       tagClose: (node) ->
         "\n"+generateCloseTag(node)
     }
-    ul: []
+    ul: ['', '\n']
     li: (node) ->
       console.log "li", @getParentNode().tag
       if @getParentNode().tag is 'ul'
         return {tagOpen: "", indent: ["* ", "  "], tagClose: "\n\n"}
       else
         return {tagOpen: "", indent: ["1. ", "   "], tagClose: "\n\n"}
-    ol: []
-    br: {hasCloser: false, tagOpen: "\n", tagClose: ""}
+    ol: ['', '\n']
+    br: {hasCloser: false, tagOpen: "  \n", tagClose: ""}
     hr: {hasCloser: false, tagOpen: "---\n", tagClose: ""}
     quote: {}
     tt: ["`", "`"]
@@ -261,11 +270,19 @@
     elements:
       '^': (element) -> null
       '$': (element) ->
-        if element.name is 'li'
+        # <td><p>foo</p></td> -> <td>foo</td>
+        if element.name is 'td'
           if element.children.length == 1
             if element.children[0].name is 'p'
               element.children = element.children[0].children
               return element
+
+        # if element.name is 'li'
+        #   if element.children.length == 1
+        #     if element.children[0].name is 'p'
+        #       element.children = element.children[0].children
+        #       return element
+
         # if element.name is 'p'
         #   if element.parent
         #     if element.parent.name is 'li'
@@ -312,14 +329,19 @@
       collect = false
       if @_.stack.length
         current = @getCurrentNode()
-        collect = current.collect
+        if current and current.collect is 'inherit'
+          collect = current.collect
 
       nextSpec = {tag, attr, output, children, collect}
+      spec = @getSpec nextSpec
+
       @_.stack.push nextSpec
 
-      if collect
+      if collect and current
         current.children.push nextSpec
 
+      if collect isnt 'inherit'
+        nextSpec.collect = spec.collect
 
     _write: (text) ->
       current = @getCurrentNode()
@@ -385,8 +407,6 @@
 
         if spec.hasCloser is false
           @flush()
-      else
-        current.collect = true
 
     attribute: (name, val) ->
       current = @getCurrentNode()
@@ -475,7 +495,7 @@
       debug "=> afterInit"
       {config} = editor
 
-    tools: { wrapped }
+    tools: { wrapped, generateOpenTag, generateCloseTag, generateHtml }
   }
 
   pluginPath = CKEDITOR.plugins.getPath('markdownwysiwyg')
