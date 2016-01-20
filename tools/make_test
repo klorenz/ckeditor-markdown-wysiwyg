@@ -21,7 +21,7 @@ bender_editor = {
   };
 
 process.stdout.write("/* bender-tags: editor,unit */\n")
-process.stdout.write("/* bender-ckeditor-plugins: markdown,entities,enterkey */\n\n")
+process.stdout.write("/* bender-ckeditor-plugins: markdownwysiwyg,entities,enterkey */\n\n")
 
 process.stdout.write("bender.editor = ")
 process.stdout.write(JSON.stringify(bender_editor, null, 2)+";\n")

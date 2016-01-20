@@ -1,16 +1,48 @@
 (->
   debug = console.log.bind console, "markdown:"
 
-  markedOpts = {
-    renderer: new marked.Renderer()
-  }
 
-  markedOpts.renderer.heading = (text, level, raw) ->
-      return """<h#{level}>#{text}</h#{level}>\n"""
+  # with marked
+  #markedOpts = {
+  #   renderer: new marked.Renderer()
+  #}
+  #
+  #markedOpts.renderer.heading = (text, level, raw) ->
+  #   return """<h#{level}>#{text}</h#{level}>\n"""
+  #
+  #htmlFromMarkdown = (source) ->
+  #  window.marked source, markedOpts
+
+  # with markdownit
+  mdit = markdownit({
+      html: true,
+      highlight: (code, lang) -> code
+  });
+  #    .use(markdownitFootnote);
+
+  htmlFromMarkdown = (source) ->
+    mdit.render(source.replace(/\t/g, '    '))
+
+  # done
 
   CKEDITOR.on 'dialogDefinition', (ev) ->
     debug "=> dialogDefinition"
     {name, definition} = ev.data
+
+    if name == 'link'
+      definition.removeContents 'target'
+      definition.removeContents 'upload'
+      definition.removeContents 'advanced'
+      tab = definition.getContents 'info'
+      tab.remove 'emailSubject'
+      tab.remove 'emailBody'
+    else if name == 'image'
+      definition.removeContents 'advanced'
+      tab = definition.getContents 'Link'
+      tab.remove 'cmbTarget'
+      tab = definition.getContents 'info'
+      tab.remove 'txtAlt'
+      tab.remove 'basic'
 
   decodeEntities = do ->
     # this prevents any overhead from creating the object each time
@@ -27,26 +59,48 @@
 
       return str
 
+  # this is applied to ready done paragraphs.
+  #
   wrapped = (text, l)	->
     o = []
     s = text
     len = 0
     last = 0
 
-    tail = text.replace /((?:^|\n)[ \t]+[^\n]+\n|(?:^|\n)[ \t]*```(?:.|\n)*(?:^|\n)[ \t]*```[ \t]*\n)|(\S+)(\s|$)/g, (m, pre, word, space) ->
+    console.log "text before: '#{text}'"
+    #tail = text.replace /(^([ \t]*)```[\s\S]*?^\2```[ \t]*\n|^[ \t]+[^\n]+\n)|(\S+)(\s|$)/mg, (m, pre, sp, word, space) ->
+    tail = text.replace /(\s*)(\S+)(\s|$)/g, (m, prefix, word, space) ->
+      console.log(
+        "m:", JSON.stringify(m),
+        "prefix:", JSON.stringify(prefix),
+        "word:", JSON.stringify(word),
+        "space:", JSON.stringify(space),
+        )
       len += m.length
       if len > l
         len = m.length
-        o[o.length-1] = "\n"
-        #o.push "\n"
-      if pre
-        o.push pre
-      else
-        o.push word, space
+        o[o.length-1] = o[o.length-1].replace(/\s*$/, "\n")
+
+      if not prefix
+        prefix = ""
+      if not space
+        space = ""
+
+      o.push prefix+word+space
+
+      # if pre
+      #   o.push pre
+      # else
+      #   o.push word
+      #   o.push space if space isnt ''
 
       return ''
 
-    return o.join('') + tail
+    console.log "tail:", JSON.stringify(tail)
+
+    result = o.join('') # + tail
+    console.log "text after: '#{result}'"
+    return result
 
   initCss = ->
     blockNames = """
@@ -61,32 +115,93 @@
 
   handleLink = (node) ->
     result = ''
-    debugger
-    if node.attr.alt
-      result += node.attr.alt
     if node.attr.href
-      result += "](#{node.attr.href}"
+      link = node.attr.href
     else if node.attr.src
-      result += "](#{node.attr.src}"
+      link = node.attr.src
+
+    if node.attr.alt and node.attr.alt != link
+      result += node.attr.alt
+
+    result += "](#{link}"
     if node.attr.title
       result += ' "' + node.attr.title + '"'
     result += ')'
     result
 
+  writeMarkdownTable = (node) ->
+    generateHtml(node)
+
+  generateOpenTag = (node) ->
+    s = "<#{node.tag}"
+    for a,v of node.attr
+      s += " #{a}="+JSON.stringify(v)
+    s += ">\n"
+    s
+
+  generateCloseTag = (node) ->
+    "</#{node.tag}>\n"
+
+  generateHtml = (node) ->
+    s = generateOpenTag(node)
+    for c in node.children
+      s += generateHtml(c)
+    s += generateCloseTag(node)
+    return s
+
   html2markdown = {
-    h1: ['# ', '\n']
-    h2: ['## ', '\n']
-    h3: ['### ', '\n']
-    h4: ['#### ', '\n']
-    h5: ['##### ', '\n']
-    h6: ['###### ', '\n']
-    pre: {
-      indent: "    "
-    }
+    h1: ['# ', '\n\n']
+    h2: ['## ', '\n\n']
+    h3: ['### ', '\n\n']
+    h4: ['#### ', '\n\n']
+    h5: ['##### ', '\n\n']
+    h6: ['###### ', '\n\n']
+    pre: (node) ->
+      if 'class' not of node.attr
+        {indent: "    "}
+      else if m = node.attr.class.match /hljs language-(.*)/
+        {tagOpen: "```#{m[1]}\n", tagClose: "```\n"}
+      else if m = node.attr.class.match /hljs/
+        {tagOpen: "```\n", tagClose: "```\n"}
+      else
+        {indent: "    "}
+
+    table:
+      collect: true
+      tagClose: (node) ->
+        if node.htmlTable
+          generateHtml(node)
+        else
+          writeMarkdownTable(node)
+
+    tbody: {}
+    thead: {}
+    tfoot: {}
+    tr: {}
+    col: {}
+    row: {}
+
+    td: {tagClose: (node) ->
+      if "\n" in node.output
+        @getParentNode('table').htmlTable = true
+      return {collect: true}
+      }
+
+    th: {tagClose: (node) ->
+      if "\n" in node.output
+        @getParentNode('table').htmlTable = true
+      return {collect: true}
+      }
+
     dl: {}
     dt: ['', "\n"]
     dd: {indented: true}
-    div: []
+    div: {
+      tagOpen: (node) ->
+        generateOpenTag(node)+"\n"
+      tagClose: (node) ->
+        "\n"+generateCloseTag(node)
+    }
     ul: []
     li: (node) ->
       console.log "li", @getParentNode().tag
@@ -101,9 +216,12 @@
     tt: ["`", "`"]
     a: ["[", handleLink]
     img: {hasCloser: false, tagOpen: ((node) -> "!["+handleLink(node)) }
-    em: ['_', '_']
-    strong: ['*', '*']
-    p: ['', '\n\n']
+    em: ['*', '*']
+    strong: ['**', '**']
+    p: {'', tagClose: (node) ->
+      node.output = wrapped(node.output, 75)
+      return '\n\n'
+    }
     blockquote: {
       indent: "> "
     }
@@ -122,7 +240,7 @@
 
   CKEDITOR.htmlParser.fragment.fromMarkdown = (source) ->
     debug "=> fromMarkdown"
-    html = window.marked source, markedOpts
+    html = htmlFromMarkdown(source)
     debug "html1", html
     fragment = CKEDITOR.htmlParser.fragment.fromHtml html
     fragment
@@ -189,7 +307,19 @@
     openTag: (tag) ->
       attr = {}
       output = ''
-      @_.stack.push {tag, attr, output}
+      children = []
+
+      collect = false
+      if @_.stack.length
+        current = @getCurrentNode()
+        collect = current.collect
+
+      nextSpec = {tag, attr, output, children, collect}
+      @_.stack.push nextSpec
+
+      if collect
+        current.children.push nextSpec
+
 
     _write: (text) ->
       current = @getCurrentNode()
@@ -200,18 +330,29 @@
         @write text
 
     text: (text) ->
+      current = @getCurrentNode()
+      if current.collect
+        current.children.push text
+        return
+
       # escape text
       text = decodeEntities text
       text = text.replace /^(\d+)\.\s/m, (m, num) -> num + "\\. "
-
-      @_write wrapped(text, 75)
+      @_write text
 
     getCurrentNode: ->
       @_.stack[@_.stack.length-1]
 
-    getParentNode: ->
+    # get parent node.  If tag given, return first parentnode with that tag
+    getParentNode: (tag) ->
+      if tag
+        for i in [@_.stack.length-2..0]
+          if @_.stack[i].tag is tag
+            return @_.stack[i]
+
       if @_.stack.length < 2
         return null
+
       @_.stack[@_.stack.length-2]
 
     getSpec: (node) ->
@@ -239,10 +380,13 @@
         if spec.tagOpenHasVar
           s = varString s, current.attr
 
-      @_write(s)
+      if not current.collect
+        @_write(s)
 
-      if spec.hasCloser is false
-        @flush()
+        if spec.hasCloser is false
+          @flush()
+      else
+        current.collect = true
 
     attribute: (name, val) ->
       current = @getCurrentNode()
@@ -273,7 +417,8 @@
         data = first + data # wrapped(data, 75)
 
         console.log "data2", data
-        data = data.replace(/\n(?!$)/g, "\n"+indent)
+        data = data.replace(/\n/g, "\n"+indent)
+        data = data.replace(/\s+$/, "\n")
 
         console.log "data3", data
 
@@ -291,9 +436,9 @@
         if spec.tagCloseHasVar
           s = varString s, current.attr
 
-      @flush()
-
-      @_write(s)
+      if not current.collect
+        @_write(s)
+        @flush()
 
       if spec.next
         @spec_stack.pop()
@@ -302,7 +447,7 @@
 
   debug "done setup html to markdown"
 
-  CKEDITOR.plugins.add 'markdown', {
+  CKEDITOR.plugins.add 'markdownwysiwyg', {
     requires: 'entities,richcombo'
 
     beforeInit: (editor) ->
@@ -329,8 +474,11 @@
     afterInit: (editor) ->
       debug "=> afterInit"
       {config} = editor
+
+    tools: { wrapped }
   }
 
-  pluginPath = CKEDITOR.plugins.getPath('markdown')
+  pluginPath = CKEDITOR.plugins.getPath('markdownwysiwyg')
+
 
 )()

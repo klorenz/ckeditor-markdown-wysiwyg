@@ -1,0 +1,165 @@
+#!/bin/sh
+':' //; exec "$(command -v nodejs || command -v node)" "$0" "$@"
+
+var fs = require('fs')
+var path = require('path')
+var filename, input, expected, name, html, markdown, expectedHtml, common_mark_tests;
+
+common_mark_tests = JSON.parse(fs.readFileSync("common_mark_tests.json"));
+
+
+bender_editor = {
+    config: {
+      autoParagraph: false
+    }
+  };
+
+process.stdout.write("/* bender-tags: editor,unit */\n")
+process.stdout.write("/* bender-ckeditor-plugins: markdownwysiwyg,entities,enterkey */\n\n")
+
+process.stdout.write("bender.editor = ")
+process.stdout.write(JSON.stringify(bender_editor, null, 2)+";\n")
+// process.stdout.write("var markdown_testdata = ")
+// process.stdout.write(JSON.stringify(testdata, null, 2))
+// process.stdout.write(";\n")
+
+setUp = function() {
+  var processor;
+  processor = this.editor.dataProcessor;
+  return processor.dataFilter.addRules({
+    attributeNames: [[/^data-cke-.*/, '']]
+  });
+}
+
+
+assertToHtml = function(name, html, markdown, expected) {
+  var ed, evtData, processor;
+  var html = html;
+
+  ed = this.editor;
+  function S1(s) { return JSON.stringify(s); }
+
+  processor = ed.dataProcessor;
+  evtData = {
+    dataValue: markdown
+  };
+  ed.fire('setData', evtData);
+
+  // var out_html = processor.toHtml(markdown);
+  var out_html = evtData.dataValue;
+  console.log("out_html1", out_html);
+
+  out_html = out_html.replace(/ id="this-is-an-h\d"/g, '');
+
+  if (!expected) {
+    expected = html.replace(/>([ \t]*\r?\n)+/g, '>')
+  }
+
+  // out_html = bender.tools.fixHtml(out_html);
+  console.log("out_html2", out_html);
+
+  return assert.areSame(S1(expected), S1(CKEDITOR.tools.convertRgbToHex(out_html)), 'markdown->html: '+name);
+}
+
+assertTransformation = function(name, markdown, html, expected) {
+  var ed, evtData, processor;
+  var html = html;
+
+  function S1(s) { return JSON.stringify(s); }
+
+  ed = this.editor;
+  processor = ed.dataProcessor;
+
+  var dataValue = processor.toDataFormat(html);
+  console.log("dataValue", dataValue);
+  evtData = {
+    'dataValue': dataValue
+  };
+  ed.fire('setData', evtData);
+
+  // var out_html = processor.toHtml(markdown);
+  var out_html = evtData.dataValue;
+  console.log("out_html1", out_html);
+
+  out_html = out_html.replace(/ id="this-is-an-h\d"/g, '');
+  if (expected === null)
+  {
+    expected = html.replace(/>([ \t]*\r?\n)+/g, '>')
+
+    expected = expected.replace(/(<pre>[\s\S]*?<\/pre>)|(\s+)/g, function(m, pre, space){
+      if (pre) {
+        return pre;
+      } else {
+        return " ";
+      }
+    });
+  }
+
+  // out_html = bender.tools.fixHtml(out_html);
+  console.log("out_html2", out_html);
+
+  return assert.areSame(S1(expected.replace(/\t/g, '    ')), S1(CKEDITOR.tools.convertRgbToHex(out_html)), 'transformation: '+name);
+}
+
+assertToMarkdown = function(name, markdown, html, expected) {
+  var ed, processor;
+  ed = this.editor;
+  processor = ed.dataProcessor;
+
+  if (!expected) {
+    expected = markdown;
+    /*
+     expected = markdown.replace(/\s+$/, '');
+     expected = expected.replace(/[ \t*]\n/g, "\n")
+    */
+  }
+
+  return assert.areSame("\n"+expected, "\n"+processor.toDataFormat(html).replace(/\n+$/, "\n"), 'html->markdown:' + name);
+}
+
+
+process.stdout.write("bender_testdata = {};\n")
+process.stdout.write("bender_testdata['setUp'] = " + setUp.toString() + ";\n")
+process.stdout.write("bender_testdata['assertToHtml'] = " + assertToHtml.toString() + ";\n")
+process.stdout.write("bender_testdata['assertTransformation'] = " + assertTransformation.toString() + ";\n")
+process.stdout.write("bender_testdata['assertToMarkdown'] = " + assertToMarkdown.toString() + ";\n")
+
+function S(s) {
+  return JSON.stringify(s).replace('</script>', '</sc"+"ript>');
+}
+
+var rec, markdown, html, expectedHtml, expectedMarkdown, name;
+for (var i = 0 ; i < common_mark_tests.length; i++) {
+   rec = common_mark_tests[i];
+   markdown = rec.markdown;
+   html = rec.html;
+   expectedHtml = rec.expectedHtml || null;
+   expectedMarkdown = rec.expectedMarkdown || null;
+
+   name = "example "+rec.example + " (" + rec.section + ")";
+
+   process.stdout.write("bender_testdata['test markdown transformation: "+name+"'] = function() { this.assertTransformation( " + S(name) + ",\n    "+ S(markdown) + ",\n    " + S(html) + ",\n    " + S(expectedHtml) + "\n)};\n")
+
+  /*
+   process.stdout.write("bender_testdata['test markdown -> html: "+name+"'] = function() { this.assertToHtml( " + S(name) + ",\n    "+ S(html) + ",\n    " + S(markdown) + ",\n    " + S(expectedHtml) + "\n)};\n")
+   process.stdout.write("bender_testdata['test html -> markdown: "+name+"'] = function() { this.assertToMarkdown( " + S(name) + ",\n    "+ S(markdown) + ",\n    " + S(html) + ",\n    " + S(expectedMarkdown) + "\n)};\n")
+  */
+}
+
+var special_tests = [ 1, 30, 31, 32 ];
+
+for (var i = 0 ; i < special_tests.length; i++) {
+   rec = common_mark_tests[special_tests[i]-1];
+   markdown = rec.markdown;
+   html = rec.html;
+   expectedHtml = rec.expectedHtml || null;
+   expectedMarkdown = rec.expectedMarkdown || null;
+
+   name = "example "+rec.example + " (" + rec.section + ")";
+
+   process.stdout.write("bender_testdata['test markdown -> html: "+name+"'] = function() { this.assertToHtml( " + S(name) + ",\n    "+ S(html) + ",\n    " + S(markdown) + ",\n    " + S(expectedHtml) + "\n)};\n")
+   process.stdout.write("bender_testdata['test html -> markdown: "+name+"'] = function() { this.assertToMarkdown( " + S(name) + ",\n    "+ S(markdown) + ",\n    " + S(html) + ",\n    " + S(expectedMarkdown) + "\n)};\n")
+}
+
+
+process.stdout.write("bender.test(bender_testdata);\n")

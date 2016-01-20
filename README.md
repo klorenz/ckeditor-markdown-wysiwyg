@@ -37,3 +37,4 @@ tools).
 Go to `ckeditor-dev` folder and ther run `bender server run`.  With your browser
 visit http://localhost:1030.  In search bar you can search for `markdown`.
 Click to run the tests.
+
